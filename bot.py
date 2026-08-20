@@ -1,15 +1,16 @@
+
+
+     
 import os
 import logging
-import asyncio
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application,
+    Updater,
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
-    filters,
-    ContextTypes,
+    Filters,
     ConversationHandler
 )
 import openai
@@ -48,24 +49,21 @@ else:
 
 # ============ SAFE OPENAI CALL ============
 
-async def safe_openai_call(prompt: str, max_retries: int = 3) -> str:
+def safe_openai_call(prompt, max_retries=3):
     """Safely call OpenAI with retry logic"""
     if not OPENAI_API_KEY:
-        return "⚠️ OpenAI API key not configured. Please add OPENAI_API_KEY in Railway variables."
+        return "⚠️ OpenAI API key not configured."
     
     for attempt in range(max_retries):
         try:
-            client = openai.OpenAI(api_key=OPENAI_API_KEY)
-            response = await asyncio.to_thread(
-                client.chat.completions.create,
+            response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant."},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=500,
-                temperature=0.7,
-                timeout=30
+                temperature=0.7
             )
             
             if response and response.choices:
@@ -73,22 +71,9 @@ async def safe_openai_call(prompt: str, max_retries: int = 3) -> str:
             else:
                 raise Exception("Empty response")
                 
-        except openai.APIConnectionError:
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
-                continue
-            return "🔌 Connection issue. Please try again."
-            
-        except openai.RateLimitError:
-            if attempt < max_retries - 1:
-                await asyncio.sleep(5 * (attempt + 1))
-                continue
-            return "⏰ Rate limit exceeded. Please wait."
-            
         except Exception as e:
-            logger.error(f"OpenAI error: {e}")
+            logger.error(f"OpenAI error attempt {attempt+1}: {e}")
             if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
                 continue
             return f"⚠️ Error: {str(e)[:100]}"
     
@@ -110,7 +95,7 @@ def get_main_menu():
 
 # ============ COMMANDS ============
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def start(update, context):
     try:
         context.user_data.clear()
         
@@ -126,17 +111,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📄 **Analyze Documents** - PDF/TXT files\n\n"
             "Choose an option below:"
         )
-        await update.message.reply_text(welcome, reply_markup=get_main_menu(), parse_mode='Markdown')
+        update.message.reply_text(welcome, reply_markup=get_main_menu(), parse_mode='Markdown')
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Error in start: {e}")
-        await update.message.reply_text("⚠️ Please try /start again.")
+        update.message.reply_text("⚠️ Please try /start again.")
         return ConversationHandler.END
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def cancel(update, context):
     try:
         context.user_data.clear()
-        await update.message.reply_text(
+        update.message.reply_text(
             "✅ Cancelled. Use /start to see options.",
             reply_markup=get_main_menu()
         )
@@ -147,10 +132,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ============ BUTTON HANDLER ============
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def button_handler(update, context):
     try:
         query = update.callback_query
-        await query.answer()
+        query.answer()
         action = query.data
         
         action_map = {
@@ -164,7 +149,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         
         message, state = action_map.get(action, ("Please choose:", None))
-        await query.edit_message_text(message, reply_markup=None)
+        query.edit_message_text(message, reply_markup=None)
         
         if state is not None:
             context.user_data['action'] = action
@@ -173,213 +158,187 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     except Exception as e:
         logger.error(f"Error in button: {e}")
-        await query.edit_message_text("⚠️ Error. Use /start to try again.")
+        query.edit_message_text("⚠️ Error. Use /start to try again.")
         return ConversationHandler.END
 
 # ============ FEATURE HANDLERS ============
 
-async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def ask_question(update, context):
     try:
         if not OPENAI_API_KEY:
-            await update.message.reply_text(
-                "⚠️ **OpenAI API key not configured!**\n\n"
-                "Please add OPENAI_API_KEY in Railway variables.",
+            update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**",
                 parse_mode='Markdown'
             )
             return ConversationHandler.END
         
         if not update.message or not update.message.text:
-            await update.message.reply_text("⚠️ Please send your question.")
+            update.message.reply_text("⚠️ Please send your question.")
             return ASKING
         
         question = update.message.text
         if len(question.strip()) < 2:
-            await update.message.reply_text("⚠️ Please ask a longer question.")
+            update.message.reply_text("⚠️ Please ask a longer question.")
             return ASKING
         
-        msg = await update.message.reply_text("🤔 Thinking...")
-        response = await safe_openai_call(f"Answer this: {question}")
+        update.message.reply_text("🤔 Thinking...")
+        response = safe_openai_call(f"Answer this: {question}")
         
         if not response:
             response = "⚠️ Could not generate response. Please try again."
         
-        try:
-            await msg.edit_text(f"💬 **Answer:**\n\n{response}", parse_mode='Markdown')
-        except:
-            await update.message.reply_text(f"💬 **Answer:**\n\n{response}", parse_mode='Markdown')
-        
-        await update.message.reply_text("What next?", reply_markup=get_main_menu())
+        update.message.reply_text(f"💬 **Answer:**\n\n{response}", parse_mode='Markdown')
+        update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
     except Exception as e:
         logger.error(f"Error in ask: {e}")
-        await update.message.reply_text("⚠️ Error. Please try again.")
+        update.message.reply_text("⚠️ Error. Please try again.")
         return ASKING
 
-async def summarize_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def summarize_text(update, context):
     try:
         if not OPENAI_API_KEY:
-            await update.message.reply_text(
-                "⚠️ **OpenAI API key not configured!**\n\n"
-                "Please add OPENAI_API_KEY in Railway variables.",
+            update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**",
                 parse_mode='Markdown'
             )
             return ConversationHandler.END
         
         if not update.message or not update.message.text:
-            await update.message.reply_text("⚠️ Send text to summarize.")
+            update.message.reply_text("⚠️ Send text to summarize.")
             return SUMMARIZING
         
         text = update.message.text
         if len(text) < 50:
-            await update.message.reply_text("⚠️ Send at least 50 characters.")
+            update.message.reply_text("⚠️ Send at least 50 characters.")
             return SUMMARIZING
         
-        msg = await update.message.reply_text("📝 Summarizing...")
-        response = await safe_openai_call(f"Summarize this:\n\n{text}")
+        update.message.reply_text("📝 Summarizing...")
+        response = safe_openai_call(f"Summarize this:\n\n{text}")
         
         if not response:
             response = "⚠️ Could not summarize. Try again."
         
-        try:
-            await msg.edit_text(f"📝 **Summary:**\n\n{response}", parse_mode='Markdown')
-        except:
-            await update.message.reply_text(f"📝 **Summary:**\n\n{response}", parse_mode='Markdown')
-        
-        await update.message.reply_text("What next?", reply_markup=get_main_menu())
+        update.message.reply_text(f"📝 **Summary:**\n\n{response}", parse_mode='Markdown')
+        update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
     except Exception as e:
         logger.error(f"Error in summarize: {e}")
-        await update.message.reply_text("⚠️ Error. Try again.")
+        update.message.reply_text("⚠️ Error. Try again.")
         return SUMMARIZING
 
-async def rewrite_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def rewrite_text(update, context):
     try:
         if not OPENAI_API_KEY:
-            await update.message.reply_text(
-                "⚠️ **OpenAI API key not configured!**\n\n"
-                "Please add OPENAI_API_KEY in Railway variables.",
+            update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**",
                 parse_mode='Markdown'
             )
             return ConversationHandler.END
         
         if not update.message or not update.message.text:
-            await update.message.reply_text("⚠️ Send text to rewrite.")
+            update.message.reply_text("⚠️ Send text to rewrite.")
             return REWRITING
         
         text = update.message.text
         if len(text) < 10:
-            await update.message.reply_text("⚠️ Send longer text.")
+            update.message.reply_text("⚠️ Send longer text.")
             return REWRITING
         
-        msg = await update.message.reply_text("✍️ Rewriting...")
-        response = await safe_openai_call(f"Rewrite this professionally:\n\n{text}")
+        update.message.reply_text("✍️ Rewriting...")
+        response = safe_openai_call(f"Rewrite this professionally:\n\n{text}")
         
         if not response:
             response = "⚠️ Could not rewrite. Try again."
         
-        try:
-            await msg.edit_text(f"✍️ **Rewritten:**\n\n{response}", parse_mode='Markdown')
-        except:
-            await update.message.reply_text(f"✍️ **Rewritten:**\n\n{response}", parse_mode='Markdown')
-        
-        await update.message.reply_text("What next?", reply_markup=get_main_menu())
+        update.message.reply_text(f"✍️ **Rewritten:**\n\n{response}", parse_mode='Markdown')
+        update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
     except Exception as e:
         logger.error(f"Error in rewrite: {e}")
-        await update.message.reply_text("⚠️ Error. Try again.")
+        update.message.reply_text("⚠️ Error. Try again.")
         return REWRITING
 
-async def generate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def generate_ideas(update, context):
     try:
         if not OPENAI_API_KEY:
-            await update.message.reply_text(
-                "⚠️ **OpenAI API key not configured!**\n\n"
-                "Please add OPENAI_API_KEY in Railway variables.",
+            update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**",
                 parse_mode='Markdown'
             )
             return ConversationHandler.END
         
         if not update.message or not update.message.text:
-            await update.message.reply_text("⚠️ Send topic for ideas.")
+            update.message.reply_text("⚠️ Send topic for ideas.")
             return IDEAS
         
         topic = update.message.text
         if len(topic.strip()) < 2:
-            await update.message.reply_text("⚠️ Specify a topic.")
+            update.message.reply_text("⚠️ Specify a topic.")
             return IDEAS
         
-        msg = await update.message.reply_text("💡 Generating ideas...")
-        response = await safe_openai_call(f"Generate 5 ideas about: {topic}")
+        update.message.reply_text("💡 Generating ideas...")
+        response = safe_openai_call(f"Generate 5 ideas about: {topic}")
         
         if not response:
             response = "⚠️ Could not generate ideas."
         
-        try:
-            await msg.edit_text(f"💡 **Ideas for {topic}:**\n\n{response}", parse_mode='Markdown')
-        except:
-            await update.message.reply_text(f"💡 **Ideas for {topic}:**\n\n{response}", parse_mode='Markdown')
-        
-        await update.message.reply_text("What next?", reply_markup=get_main_menu())
+        update.message.reply_text(f"💡 **Ideas for {topic}:**\n\n{response}", parse_mode='Markdown')
+        update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
     except Exception as e:
         logger.error(f"Error in ideas: {e}")
-        await update.message.reply_text("⚠️ Error. Try again.")
+        update.message.reply_text("⚠️ Error. Try again.")
         return IDEAS
 
-async def explain_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def explain_topic(update, context):
     try:
         if not OPENAI_API_KEY:
-            await update.message.reply_text(
-                "⚠️ **OpenAI API key not configured!**\n\n"
-                "Please add OPENAI_API_KEY in Railway variables.",
+            update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**",
                 parse_mode='Markdown'
             )
             return ConversationHandler.END
         
         if not update.message or not update.message.text:
-            await update.message.reply_text("⚠️ Send topic to explain.")
+            update.message.reply_text("⚠️ Send topic to explain.")
             return EXPLAINING
         
         topic = update.message.text
         if len(topic.strip()) < 2:
-            await update.message.reply_text("⚠️ Specify a topic.")
+            update.message.reply_text("⚠️ Specify a topic.")
             return EXPLAINING
         
-        msg = await update.message.reply_text("📚 Explaining...")
-        response = await safe_openai_call(f"Explain simply: {topic}")
+        update.message.reply_text("📚 Explaining...")
+        response = safe_openai_call(f"Explain simply: {topic}")
         
         if not response:
             response = "⚠️ Could not explain. Try again."
         
-        try:
-            await msg.edit_text(f"📚 **Explanation:**\n\n{response}", parse_mode='Markdown')
-        except:
-            await update.message.reply_text(f"📚 **Explanation:**\n\n{response}", parse_mode='Markdown')
-        
-        await update.message.reply_text("What next?", reply_markup=get_main_menu())
+        update.message.reply_text(f"📚 **Explanation:**\n\n{response}", parse_mode='Markdown')
+        update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
     except Exception as e:
         logger.error(f"Error in explain: {e}")
-        await update.message.reply_text("⚠️ Error. Try again.")
+        update.message.reply_text("⚠️ Error. Try again.")
         return EXPLAINING
 
-async def translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def translate_text(update, context):
     try:
         if not OPENAI_API_KEY:
-            await update.message.reply_text(
-                "⚠️ **OpenAI API key not configured!**\n\n"
-                "Please add OPENAI_API_KEY in Railway variables.",
+            update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**",
                 parse_mode='Markdown'
             )
             return ConversationHandler.END
         
         if not update.message or not update.message.text:
-            await update.message.reply_text("⚠️ Format: language: text")
+            update.message.reply_text("⚠️ Format: language: text")
             return TRANSLATING
         
         text = update.message.text
@@ -389,90 +348,74 @@ async def translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_lang = parts[0].strip()
             text_to_translate = parts[1].strip()
         else:
-            await update.message.reply_text("⚠️ Format: language: text\nExample: Spanish:Hello")
+            update.message.reply_text("⚠️ Format: language: text\nExample: Spanish:Hello")
             return TRANSLATING
         
         if not target_lang or not text_to_translate:
-            await update.message.reply_text("⚠️ Provide both language and text.")
+            update.message.reply_text("⚠️ Provide both language and text.")
             return TRANSLATING
         
-        msg = await update.message.reply_text("🌐 Translating...")
-        response = await safe_openai_call(f"Translate to {target_lang}:\n\n{text_to_translate}")
+        update.message.reply_text("🌐 Translating...")
+        response = safe_openai_call(f"Translate to {target_lang}:\n\n{text_to_translate}")
         
         if not response:
             response = "⚠️ Could not translate."
         
-        try:
-            await msg.edit_text(f"🌐 **Translation ({target_lang}):**\n\n{response}", parse_mode='Markdown')
-        except:
-            await update.message.reply_text(f"🌐 **Translation ({target_lang}):**\n\n{response}", parse_mode='Markdown')
-        
-        await update.message.reply_text("What next?", reply_markup=get_main_menu())
+        update.message.reply_text(f"🌐 **Translation ({target_lang}):**\n\n{response}", parse_mode='Markdown')
+        update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
     except Exception as e:
         logger.error(f"Error in translate: {e}")
-        await update.message.reply_text("⚠️ Error. Try again.")
+        update.message.reply_text("⚠️ Error. Try again.")
         return TRANSLATING
 
-async def analyze_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def analyze_document(update, context):
     try:
         if not OPENAI_API_KEY:
-            await update.message.reply_text(
-                "⚠️ **OpenAI API key not configured!**\n\n"
-                "Please add OPENAI_API_KEY in Railway variables.",
+            update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**",
                 parse_mode='Markdown'
             )
             return ConversationHandler.END
         
         if not update.message or not update.message.document:
-            await update.message.reply_text("⚠️ Upload a document.")
+            update.message.reply_text("⚠️ Upload a document.")
             return DOCUMENT
         
         doc = update.message.document
         file_name = doc.file_name
         
         if doc.file_size > 5 * 1024 * 1024:
-            await update.message.reply_text("⚠️ File under 5MB only.")
+            update.message.reply_text("⚠️ File under 5MB only.")
             return DOCUMENT
         
         if not any(file_name.lower().endswith(ext) for ext in ['.txt', '.pdf']):
-            await update.message.reply_text("⚠️ TXT or PDF only.")
+            update.message.reply_text("⚠️ TXT or PDF only.")
             return DOCUMENT
         
-        msg = await update.message.reply_text("📄 Analyzing...")
+        update.message.reply_text("📄 Analyzing...")
         
-        file = await doc.get_file()
-        file_content = await file.download_as_bytearray()
-        
-        if file_name.lower().endswith('.txt'):
-            text = file_content.decode('utf-8', errors='ignore')
-        else:
-            text = "PDF content preview: " + str(file_content[:500])
-        
-        response = await safe_openai_call(f"Summarize this document:\n\n{text[:2000]}")
+        # For simplicity, just use the file name
+        response = safe_openai_call(f"Analyze this document: {file_name}")
         
         if not response:
             response = "⚠️ Could not analyze."
         
-        try:
-            await msg.edit_text(f"📄 **Analysis:**\n\n{response}", parse_mode='Markdown')
-        except:
-            await update.message.reply_text(f"📄 **Analysis:**\n\n{response}", parse_mode='Markdown')
-        
-        await update.message.reply_text("What next?", reply_markup=get_main_menu())
+        update.message.reply_text(f"📄 **Analysis:**\n\n{response}", parse_mode='Markdown')
+        update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
     except Exception as e:
         logger.error(f"Error in document: {e}")
-        await update.message.reply_text("⚠️ Error. Try again.")
+        update.message.reply_text("⚠️ Error. Try again.")
         return DOCUMENT
 
 # ============ FALLBACK ============
 
-async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def fallback_handler(update, context):
     try:
-        await update.message.reply_text(
+        update.message.reply_text(
             "⚠️ Use /start to see options.",
             reply_markup=get_main_menu()
         )
@@ -481,11 +424,11 @@ async def fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ============ ERROR HANDLER ============
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def error_handler(update, context):
     logger.error(f"❌ Error: {context.error}")
     try:
-        if update and update.effective_message:
-            await update.effective_message.reply_text(
+        if update and update.message:
+            update.message.reply_text(
                 "⚠️ Error occurred. Use /start to reset."
             )
     except:
@@ -500,6 +443,7 @@ def main():
     
     if not TELEGRAM_TOKEN:
         print("❌ TELEGRAM_BOT_TOKEN not found!")
+        print("Please add it in Railway Variables")
         return
     
     print(f"✅ Telegram Token found: {TELEGRAM_TOKEN[:10]}...")
@@ -508,44 +452,47 @@ def main():
         print(f"✅ OpenAI API Key found: {OPENAI_API_KEY[:15]}...")
     else:
         print("❌ OPENAI_API_KEY not found!")
+        print("Some features won't work. Please add OPENAI_API_KEY in Railway Variables.")
     
     try:
-        # Build application
-        application = Application.builder().token(TELEGRAM_TOKEN).build()
+        # Create updater
+        updater = Updater(TELEGRAM_TOKEN, use_context=True)
+        dp = updater.dispatcher
         
-        # Add conversation handler
+        # Create conversation handler
         conv_handler = ConversationHandler(
             entry_points=[
                 CommandHandler('start', start),
             ],
             states={
-                ASKING: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question)],
-                SUMMARIZING: [MessageHandler(filters.TEXT & ~filters.COMMAND, summarize_text)],
-                REWRITING: [MessageHandler(filters.TEXT & ~filters.COMMAND, rewrite_text)],
-                IDEAS: [MessageHandler(filters.TEXT & ~filters.COMMAND, generate_ideas)],
-                EXPLAINING: [MessageHandler(filters.TEXT & ~filters.COMMAND, explain_topic)],
-                TRANSLATING: [MessageHandler(filters.TEXT & ~filters.COMMAND, translate_text)],
+                ASKING: [MessageHandler(Filters.text & ~Filters.command, ask_question)],
+                SUMMARIZING: [MessageHandler(Filters.text & ~Filters.command, summarize_text)],
+                REWRITING: [MessageHandler(Filters.text & ~Filters.command, rewrite_text)],
+                IDEAS: [MessageHandler(Filters.text & ~Filters.command, generate_ideas)],
+                EXPLAINING: [MessageHandler(Filters.text & ~Filters.command, explain_topic)],
+                TRANSLATING: [MessageHandler(Filters.text & ~Filters.command, translate_text)],
                 DOCUMENT: [
-                    MessageHandler(filters.Document.ALL, analyze_document),
+                    MessageHandler(Filters.document, analyze_document),
                 ],
             },
             fallbacks=[
                 CommandHandler('cancel', cancel),
                 CommandHandler('start', start),
-                MessageHandler(filters.ALL, fallback_handler),
+                MessageHandler(Filters.all, fallback_handler),
             ],
         )
         
         # Add handlers
-        application.add_handler(conv_handler)
-        application.add_handler(CallbackQueryHandler(button_handler))
-        application.add_error_handler(error_handler)
+        dp.add_handler(conv_handler)
+        dp.add_handler(CallbackQueryHandler(button_handler))
+        dp.add_error_handler(error_handler)
         
         print("✅ Bot is running!")
         print("🟢 Press Ctrl+C to stop\n")
         
-        # Start polling (fixed for version 20.6)
-        application.run_polling()
+        # Start polling
+        updater.start_polling()
+        updater.idle()
         
     except Exception as e:
         logger.critical(f"❌ Fatal error: {e}")
