@@ -14,8 +14,29 @@ from telegram.ext import (
 )
 import openai
 
-# Load environment variables
+# Load environment variables - Try multiple ways
 load_dotenv()
+
+# Try to get API key from environment
+openai_api_key = os.getenv('OPENAI_API_KEY')
+
+# If not found, try reading from .env file directly
+if not openai_api_key:
+    try:
+        with open('.env', 'r') as f:
+            for line in f:
+                if line.startswith('OPENAI_API_KEY='):
+                    openai_api_key = line.split('=')[1].strip()
+                    break
+    except:
+        pass
+
+# Set OpenAI API key
+if openai_api_key:
+    openai.api_key = openai_api_key
+    print("✅ OpenAI API key loaded successfully")
+else:
+    print("❌ OPENAI_API_KEY not found! Some features won't work.")
 
 # Setup logging
 logging.basicConfig(
@@ -35,17 +56,18 @@ logger = logging.getLogger(__name__)
     DOCUMENT
 ) = range(7)
 
-# Initialize OpenAI
-openai.api_key = os.getenv('OPENAI_API_KEY')
-
 # ============ SAFE OPENAI CALL WITH RETRY ============
 
 async def safe_openai_call(prompt: str, max_retries: int = 3) -> str:
     """Safely call OpenAI with retry logic"""
+    if not openai_api_key:
+        return "⚠️ OpenAI API key not configured. Please set OPENAI_API_KEY in Railway variables."
+    
     for attempt in range(max_retries):
         try:
+            client = openai.OpenAI(api_key=openai_api_key)
             response = await asyncio.to_thread(
-                openai.chat.completions.create,
+                client.chat.completions.create,
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant."},
@@ -100,8 +122,16 @@ def get_main_menu():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         context.user_data.clear()
+        
+        # Check if API key is configured
+        if not openai_api_key:
+            warning = "⚠️ **Notice:** OpenAI API key not configured.\n\n"
+        else:
+            warning = ""
+        
         welcome = (
             "🤖 **Welcome to SmartBot!**\n\n"
+            f"{warning}"
             "Your AI-powered assistant is ready to help you with:\n\n"
             "💬 **Ask Questions** - Get answers\n"
             "📝 **Summarize Text** - Short summaries\n"
@@ -166,6 +196,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        if not openai_api_key:
+            await update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**\n\n"
+                "Please add OPENAI_API_KEY in Railway variables.\n"
+                "Contact the bot administrator.",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+        
         if not update.message or not update.message.text:
             await update.message.reply_text("⚠️ Please send your question.")
             return ASKING
@@ -181,7 +220,11 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not response:
             response = "⚠️ Could not generate response. Please try again."
         
-        await msg.edit_text(f"💬 **Answer:**\n\n{response}", parse_mode='Markdown')
+        try:
+            await msg.edit_text(f"💬 **Answer:**\n\n{response}", parse_mode='Markdown')
+        except:
+            await update.message.reply_text(f"💬 **Answer:**\n\n{response}", parse_mode='Markdown')
+        
         await update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
@@ -192,6 +235,14 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def summarize_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        if not openai_api_key:
+            await update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**\n\n"
+                "Please add OPENAI_API_KEY in Railway variables.",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+        
         if not update.message or not update.message.text:
             await update.message.reply_text("⚠️ Send text to summarize.")
             return SUMMARIZING
@@ -207,7 +258,11 @@ async def summarize_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not response:
             response = "⚠️ Could not summarize. Try again."
         
-        await msg.edit_text(f"📝 **Summary:**\n\n{response}", parse_mode='Markdown')
+        try:
+            await msg.edit_text(f"📝 **Summary:**\n\n{response}", parse_mode='Markdown')
+        except:
+            await update.message.reply_text(f"📝 **Summary:**\n\n{response}", parse_mode='Markdown')
+        
         await update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
@@ -218,6 +273,14 @@ async def summarize_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def rewrite_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        if not openai_api_key:
+            await update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**\n\n"
+                "Please add OPENAI_API_KEY in Railway variables.",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+        
         if not update.message or not update.message.text:
             await update.message.reply_text("⚠️ Send text to rewrite.")
             return REWRITING
@@ -233,7 +296,11 @@ async def rewrite_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not response:
             response = "⚠️ Could not rewrite. Try again."
         
-        await msg.edit_text(f"✍️ **Rewritten:**\n\n{response}", parse_mode='Markdown')
+        try:
+            await msg.edit_text(f"✍️ **Rewritten:**\n\n{response}", parse_mode='Markdown')
+        except:
+            await update.message.reply_text(f"✍️ **Rewritten:**\n\n{response}", parse_mode='Markdown')
+        
         await update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
@@ -244,6 +311,14 @@ async def rewrite_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def generate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        if not openai_api_key:
+            await update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**\n\n"
+                "Please add OPENAI_API_KEY in Railway variables.",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+        
         if not update.message or not update.message.text:
             await update.message.reply_text("⚠️ Send topic for ideas.")
             return IDEAS
@@ -259,7 +334,11 @@ async def generate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not response:
             response = "⚠️ Could not generate ideas."
         
-        await msg.edit_text(f"💡 **Ideas for {topic}:**\n\n{response}", parse_mode='Markdown')
+        try:
+            await msg.edit_text(f"💡 **Ideas for {topic}:**\n\n{response}", parse_mode='Markdown')
+        except:
+            await update.message.reply_text(f"💡 **Ideas for {topic}:**\n\n{response}", parse_mode='Markdown')
+        
         await update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
@@ -270,6 +349,14 @@ async def generate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def explain_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        if not openai_api_key:
+            await update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**\n\n"
+                "Please add OPENAI_API_KEY in Railway variables.",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+        
         if not update.message or not update.message.text:
             await update.message.reply_text("⚠️ Send topic to explain.")
             return EXPLAINING
@@ -285,7 +372,11 @@ async def explain_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not response:
             response = "⚠️ Could not explain. Try again."
         
-        await msg.edit_text(f"📚 **Explanation:**\n\n{response}", parse_mode='Markdown')
+        try:
+            await msg.edit_text(f"📚 **Explanation:**\n\n{response}", parse_mode='Markdown')
+        except:
+            await update.message.reply_text(f"📚 **Explanation:**\n\n{response}", parse_mode='Markdown')
+        
         await update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
@@ -296,6 +387,14 @@ async def explain_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        if not openai_api_key:
+            await update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**\n\n"
+                "Please add OPENAI_API_KEY in Railway variables.",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+        
         if not update.message or not update.message.text:
             await update.message.reply_text("⚠️ Format: language: text")
             return TRANSLATING
@@ -320,7 +419,11 @@ async def translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not response:
             response = "⚠️ Could not translate."
         
-        await msg.edit_text(f"🌐 **Translation ({target_lang}):**\n\n{response}", parse_mode='Markdown')
+        try:
+            await msg.edit_text(f"🌐 **Translation ({target_lang}):**\n\n{response}", parse_mode='Markdown')
+        except:
+            await update.message.reply_text(f"🌐 **Translation ({target_lang}):**\n\n{response}", parse_mode='Markdown')
+        
         await update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
@@ -331,6 +434,14 @@ async def translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def analyze_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        if not openai_api_key:
+            await update.message.reply_text(
+                "⚠️ **OpenAI API key not configured!**\n\n"
+                "Please add OPENAI_API_KEY in Railway variables.",
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
+        
         if not update.message or not update.message.document:
             await update.message.reply_text("⚠️ Upload a document.")
             return DOCUMENT
@@ -351,7 +462,6 @@ async def analyze_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file = await doc.get_file()
         file_content = await file.download_as_bytearray()
         
-        # Simple text extraction
         if file_name.lower().endswith('.txt'):
             text = file_content.decode('utf-8', errors='ignore')
         else:
@@ -362,7 +472,11 @@ async def analyze_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not response:
             response = "⚠️ Could not analyze."
         
-        await msg.edit_text(f"📄 **Analysis:**\n\n{response}", parse_mode='Markdown')
+        try:
+            await msg.edit_text(f"📄 **Analysis:**\n\n{response}", parse_mode='Markdown')
+        except:
+            await update.message.reply_text(f"📄 **Analysis:**\n\n{response}", parse_mode='Markdown')
+        
         await update.message.reply_text("What next?", reply_markup=get_main_menu())
         return ConversationHandler.END
         
@@ -402,15 +516,19 @@ def main():
     print("="*50 + "\n")
     
     bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-    api_key = os.getenv('OPENAI_API_KEY')
     
     if not bot_token:
         print("❌ TELEGRAM_BOT_TOKEN not found!")
-        print("Create .env file with: TELEGRAM_BOT_TOKEN=your_token")
+        print("Please add it in Railway Variables")
         return
     
-    if not api_key:
-        print("⚠️ OPENAI_API_KEY not found. Some features may not work.")
+    print(f"✅ Telegram Token found: {bot_token[:10]}...")
+    
+    if openai_api_key:
+        print(f"✅ OpenAI API Key found: {openai_api_key[:10]}...")
+    else:
+        print("❌ OPENAI_API_KEY not found!")
+        print("Some features won't work. Please add OPENAI_API_KEY in Railway Variables.")
     
     try:
         app = Application.builder().token(bot_token).build()
@@ -451,6 +569,7 @@ def main():
         
     except Exception as e:
         logger.critical(f"❌ Fatal error: {e}")
+        print(f"\n❌ Fatal error: {e}")
 
 if __name__ == '__main__':
     main()
