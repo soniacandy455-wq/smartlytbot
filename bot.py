@@ -14,29 +14,8 @@ from telegram.ext import (
 )
 import openai
 
-# Load environment variables - Try multiple ways
+# Load environment variables
 load_dotenv()
-
-# Try to get API key from environment
-openai_api_key = os.getenv('OPENAI_API_KEY')
-
-# If not found, try reading from .env file directly
-if not openai_api_key:
-    try:
-        with open('.env', 'r') as f:
-            for line in f:
-                if line.startswith('OPENAI_API_KEY='):
-                    openai_api_key = line.split('=')[1].strip()
-                    break
-    except:
-        pass
-
-# Set OpenAI API key
-if openai_api_key:
-    openai.api_key = openai_api_key
-    print("✅ OpenAI API key loaded successfully")
-else:
-    print("❌ OPENAI_API_KEY not found! Some features won't work.")
 
 # Setup logging
 logging.basicConfig(
@@ -44,6 +23,17 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# Get API keys
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
+# Initialize OpenAI
+if OPENAI_API_KEY:
+    openai.api_key = OPENAI_API_KEY
+    print("✅ OpenAI API key loaded successfully")
+else:
+    print("❌ OPENAI_API_KEY not found")
 
 # States for conversation
 (
@@ -56,16 +46,16 @@ logger = logging.getLogger(__name__)
     DOCUMENT
 ) = range(7)
 
-# ============ SAFE OPENAI CALL WITH RETRY ============
+# ============ SAFE OPENAI CALL ============
 
 async def safe_openai_call(prompt: str, max_retries: int = 3) -> str:
     """Safely call OpenAI with retry logic"""
-    if not openai_api_key:
-        return "⚠️ OpenAI API key not configured. Please set OPENAI_API_KEY in Railway variables."
+    if not OPENAI_API_KEY:
+        return "⚠️ OpenAI API key not configured. Please add OPENAI_API_KEY in Railway variables."
     
     for attempt in range(max_retries):
         try:
-            client = openai.OpenAI(api_key=openai_api_key)
+            client = openai.OpenAI(api_key=OPENAI_API_KEY)
             response = await asyncio.to_thread(
                 client.chat.completions.create,
                 model="gpt-3.5-turbo",
@@ -98,6 +88,7 @@ async def safe_openai_call(prompt: str, max_retries: int = 3) -> str:
         except Exception as e:
             logger.error(f"OpenAI error: {e}")
             if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** attempt)
                 continue
             return f"⚠️ Error: {str(e)[:100]}"
     
@@ -123,15 +114,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         context.user_data.clear()
         
-        # Check if API key is configured
-        if not openai_api_key:
-            warning = "⚠️ **Notice:** OpenAI API key not configured.\n\n"
-        else:
-            warning = ""
-        
         welcome = (
             "🤖 **Welcome to SmartBot!**\n\n"
-            f"{warning}"
             "Your AI-powered assistant is ready to help you with:\n\n"
             "💬 **Ask Questions** - Get answers\n"
             "📝 **Summarize Text** - Short summaries\n"
@@ -196,11 +180,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if not openai_api_key:
+        if not OPENAI_API_KEY:
             await update.message.reply_text(
                 "⚠️ **OpenAI API key not configured!**\n\n"
-                "Please add OPENAI_API_KEY in Railway variables.\n"
-                "Contact the bot administrator.",
+                "Please add OPENAI_API_KEY in Railway variables.",
                 parse_mode='Markdown'
             )
             return ConversationHandler.END
@@ -235,7 +218,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def summarize_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if not openai_api_key:
+        if not OPENAI_API_KEY:
             await update.message.reply_text(
                 "⚠️ **OpenAI API key not configured!**\n\n"
                 "Please add OPENAI_API_KEY in Railway variables.",
@@ -273,7 +256,7 @@ async def summarize_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def rewrite_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if not openai_api_key:
+        if not OPENAI_API_KEY:
             await update.message.reply_text(
                 "⚠️ **OpenAI API key not configured!**\n\n"
                 "Please add OPENAI_API_KEY in Railway variables.",
@@ -311,7 +294,7 @@ async def rewrite_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def generate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if not openai_api_key:
+        if not OPENAI_API_KEY:
             await update.message.reply_text(
                 "⚠️ **OpenAI API key not configured!**\n\n"
                 "Please add OPENAI_API_KEY in Railway variables.",
@@ -349,7 +332,7 @@ async def generate_ideas(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def explain_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if not openai_api_key:
+        if not OPENAI_API_KEY:
             await update.message.reply_text(
                 "⚠️ **OpenAI API key not configured!**\n\n"
                 "Please add OPENAI_API_KEY in Railway variables.",
@@ -387,7 +370,7 @@ async def explain_topic(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if not openai_api_key:
+        if not OPENAI_API_KEY:
             await update.message.reply_text(
                 "⚠️ **OpenAI API key not configured!**\n\n"
                 "Please add OPENAI_API_KEY in Railway variables.",
@@ -434,7 +417,7 @@ async def translate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def analyze_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        if not openai_api_key:
+        if not OPENAI_API_KEY:
             await update.message.reply_text(
                 "⚠️ **OpenAI API key not configured!**\n\n"
                 "Please add OPENAI_API_KEY in Railway variables.",
@@ -515,24 +498,22 @@ def main():
     print("🤖 Starting SmartBot...")
     print("="*50 + "\n")
     
-    bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-    
-    if not bot_token:
+    if not TELEGRAM_TOKEN:
         print("❌ TELEGRAM_BOT_TOKEN not found!")
-        print("Please add it in Railway Variables")
         return
     
-    print(f"✅ Telegram Token found: {bot_token[:10]}...")
+    print(f"✅ Telegram Token found: {TELEGRAM_TOKEN[:10]}...")
     
-    if openai_api_key:
-        print(f"✅ OpenAI API Key found: {openai_api_key[:10]}...")
+    if OPENAI_API_KEY:
+        print(f"✅ OpenAI API Key found: {OPENAI_API_KEY[:15]}...")
     else:
         print("❌ OPENAI_API_KEY not found!")
-        print("Some features won't work. Please add OPENAI_API_KEY in Railway Variables.")
     
     try:
-        app = Application.builder().token(bot_token).build()
+        # Build application
+        application = Application.builder().token(TELEGRAM_TOKEN).build()
         
+        # Add conversation handler
         conv_handler = ConversationHandler(
             entry_points=[
                 CommandHandler('start', start),
@@ -555,17 +536,16 @@ def main():
             ],
         )
         
-        app.add_handler(conv_handler)
-        app.add_handler(CallbackQueryHandler(button_handler))
-        app.add_error_handler(error_handler)
+        # Add handlers
+        application.add_handler(conv_handler)
+        application.add_handler(CallbackQueryHandler(button_handler))
+        application.add_error_handler(error_handler)
         
         print("✅ Bot is running!")
         print("🟢 Press Ctrl+C to stop\n")
         
-        app.run_polling(
-            allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True
-        )
+        # Start polling (fixed for version 20.6)
+        application.run_polling()
         
     except Exception as e:
         logger.critical(f"❌ Fatal error: {e}")
